@@ -25,8 +25,8 @@ class FlipGradientBuilder:
 flip_gradient = FlipGradientBuilder()
 
 
-def naive_birnn(inputs, seq_len, num_units, reuse=tf.AUTO_REUSE, name="naive_birnn"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+def naive_birnn(inputs, seq_len, num_units, name="naive_birnn"):
+    with tf.compat.v1.variable_scope(name, dtype=tf.float32):
         cell_fw = tf.nn.rnn_cell.LSTMCell(num_units)
         cell_bw = tf.nn.rnn_cell.LSTMCell(num_units)
         (o_fw, o_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, inputs, seq_len, dtype=tf.float32)
@@ -34,42 +34,40 @@ def naive_birnn(inputs, seq_len, num_units, reuse=tf.AUTO_REUSE, name="naive_bir
 
 
 def char_meta_birnn(inputs, seq_len, start_index, end_index, num_units, num_layers, dim, drop_rate=0.0, training=False,
-                    activation=tf.tanh, reuse=tf.AUTO_REUSE, name="char_meta_birnn"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+                    activation=tf.tanh,  name="char_meta_birnn"):
+    with tf.variable_scope(name, dtype=tf.float32):
         outputs = inputs
         o_fw, o_bw = None, None
         for layer in range(num_layers):
-            o_fw, o_bw = naive_birnn(outputs, seq_len, num_units, reuse=reuse, name="naive_birnn_%d" % layer)
+            o_fw, o_bw = naive_birnn(outputs, seq_len, num_units, name="naive_birnn_%d" % layer)
             outputs = tf.layers.dropout(tf.concat([o_fw, o_bw], axis=-1), rate=drop_rate, training=training)
         fw_start, fw_end = tf.gather_nd(o_fw, start_index), tf.gather_nd(o_fw, end_index)
         bw_start, bw_end = tf.gather_nd(o_bw, start_index), tf.gather_nd(o_bw, end_index)
         outputs = tf.concat([fw_start, fw_end, bw_start, bw_end], axis=-1)
-        outputs = tf.layers.dense(outputs, units=dim, use_bias=True, activation=activation, reuse=reuse, name="dense")
+        outputs = tf.layers.dense(outputs, units=dim, use_bias=True, activation=activation, name="dense")
         outputs = tf.layers.dropout(outputs, rate=drop_rate, training=training)
         return outputs
 
 
 def char_cnn_hw(inputs, kernel_sizes, filters, dim, hw_layers, padding="VALID", activation=tf.nn.relu, use_bias=True,
-                hw_activation=tf.tanh, reuse=tf.AUTO_REUSE, name="char_cnn_hw"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+                hw_activation=tf.tanh, name="char_cnn_hw"):
+    with tf.variable_scope(name, dtype=tf.float32):
         outputs = []
         for i, (kernel_size, filter_size) in enumerate(zip(kernel_sizes, filters)):
-            weight = tf.get_variable("filter_%d" % i, shape=[1, kernel_size, dim, filter_size], dtype=tf.float32)
-            bias = tf.get_variable("bias_%d" % i, shape=[filter_size], dtype=tf.float32)
+            weight = tf.Variable(name = "filter_%d" % i, initial_value=tf.zeros([1, kernel_size, dim, filter_size]), dtype=tf.float32)
+            bias = tf.Variable(name = "bias_%d" % i, initial_value=tf.zeros([filter_size]), dtype=tf.float32)
             conv = tf.nn.conv2d(inputs, weight, strides=[1, 1, 1, 1], padding=padding, name="conv_%d" % i)
             conv = tf.nn.bias_add(conv, bias=bias)
             pool = tf.reduce_max(activation(conv), axis=2)
             outputs.append(pool)
         outputs = tf.concat(values=outputs, axis=-1)
         for i in range(hw_layers):
-            outputs = highway_layer(outputs, num_unit=sum(filters), activation=hw_activation, use_bias=use_bias,
-                                    reuse=reuse, name="highway_%d" % i)
+            outputs = highway_layer(outputs, num_unit=sum(filters), activation=hw_activation, use_bias=use_bias, name="highway_%d" % i)
         return outputs
 
 
-def bi_rnn(inputs, seq_len, training, num_units, drop_rate=0.0, activation=tf.tanh, concat=True, use_peepholes=False,
-           reuse=tf.AUTO_REUSE, name="bi_rnn"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+def bi_rnn(inputs, seq_len, training, num_units, drop_rate=0.0, activation=tf.tanh, concat=True, use_peepholes=False, name="bi_rnn"):
+    with tf.variable_scope(name, dtype=tf.float32):
         cell_fw = tf.nn.rnn_cell.LSTMCell(num_units, use_peepholes=use_peepholes, name="forward_lstm_cell")
         cell_bw = tf.nn.rnn_cell.LSTMCell(num_units, use_peepholes=use_peepholes, name="backward_lstm_cell")
         outputs, _ = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, inputs, seq_len, dtype=tf.float32)
@@ -78,17 +76,17 @@ def bi_rnn(inputs, seq_len, training, num_units, drop_rate=0.0, activation=tf.ta
             outputs = tf.layers.dropout(outputs, rate=drop_rate, training=training)
             outputs = tf.layers.dense(outputs, units=2 * num_units, use_bias=True, activation=activation, name="dense")
         else:
-            output1 = tf.layers.dense(outputs[0], units=num_units, use_bias=True, reuse=reuse, name="forward_dense")
+            output1 = tf.layers.dense(outputs[0], units=num_units, use_bias=True, name="forward_dense")
             output1 = tf.layers.dropout(output1, rate=drop_rate, training=training)
-            output2 = tf.layers.dense(outputs[1], units=num_units, use_bias=True, reuse=reuse, name="backward_dense")
+            output2 = tf.layers.dense(outputs[1], units=num_units, use_bias=True, name="backward_dense")
             output2 = tf.layers.dropout(output2, rate=drop_rate, training=training)
-            bias = tf.get_variable(name="bias", shape=[num_units], dtype=tf.float32, trainable=True)
+            bias = tf.Variable(name="bias", initial_value=tf.zeros([num_units]), dtype=tf.float32, trainable=True)
             outputs = activation(tf.nn.bias_add(output1 + output2, bias=bias))
         return outputs
 
 
-def highway_layer(inputs, num_unit, activation, use_bias=True, reuse=tf.AUTO_REUSE, name="highway"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+def highway_layer(inputs, num_unit, activation, use_bias=True, name="highway"):
+    with tf.variable_scope(name, dtype=tf.float32):
         trans_gate = tf.layers.dense(inputs, units=num_unit, use_bias=use_bias, activation=tf.sigmoid,
                                      name="trans_gate")
         hidden = tf.layers.dense(inputs, units=num_unit, use_bias=use_bias, activation=activation, name="hidden")
@@ -97,8 +95,8 @@ def highway_layer(inputs, num_unit, activation, use_bias=True, reuse=tf.AUTO_REU
         return output
 
 
-def gate_add(inputs1, inputs2, use_bias=True, reuse=tf.AUTO_REUSE, name="gate_add"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+def gate_add(inputs1, inputs2, use_bias=True, name="gate_add"):
+    with tf.variable_scope(name, dtype=tf.float32):
         num_units = inputs2.get_shape().as_list()[-1]
         trans_gate = tf.layers.dense(inputs2, units=num_units, use_bias=use_bias, activation=tf.sigmoid, name="trans")
         carry_gate = tf.subtract(1.0, trans_gate, name="carry")
@@ -106,22 +104,22 @@ def gate_add(inputs1, inputs2, use_bias=True, reuse=tf.AUTO_REUSE, name="gate_ad
         return output
 
 
-def crf_layer(inputs, labels, seq_len, num_units, reuse=tf.AUTO_REUSE, name="crf"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
-        transition = tf.get_variable(name="transition", shape=[num_units, num_units], dtype=tf.float32)
+def crf_layer(inputs, labels, seq_len, num_units, name="crf"):
+    with tf.variable_scope(name, dtype=tf.float32):
+        transition = tf.Variable(name="transition", initial_value=tf.zeros([num_units, num_units]), dtype=tf.float32)
         crf_loss, transition = tf.contrib.crf.crf_log_likelihood(inputs, labels, seq_len, transition)
         return transition, tf.reduce_mean(-crf_loss)
 
 
 def embedding_lookup(tokens, token_size, token_dim, token2vec=None, token_weight=None, tune_emb=True, norm_emb=True,
-                     project=False, new_dim=None, adversarial_training=False, reuse=tf.AUTO_REUSE, name="lookup_table"):
-    with tf.variable_scope(name, reuse=reuse):
+                     project=False, new_dim=None, adversarial_training=False, name="lookup_table"):
+    with tf.compat.v1.variable_scope(name,reuse=True):
         if token2vec is not None:
             table = tf.Variable(initial_value=token2vec, name="table", dtype=tf.float32, trainable=tune_emb)
-            unk = tf.get_variable(name="unk", shape=[1, token_dim], trainable=True, dtype=tf.float32)
+            unk = tf.Variable(name="unk", initial_value=tf.zeros([1, token_dim]), trainable=True, dtype=tf.float32)
             table = tf.concat([unk, table], axis=0)
         else:
-            table = tf.get_variable(name="table", shape=[token_size - 1, token_dim], dtype=tf.float32, trainable=True)
+            table = tf.Variable(name="table", initial_value=tf.zeros([token_size - 1, token_dim]), dtype=tf.float32, trainable=True)
         if adversarial_training and norm_emb and token_weight is not None:
             weights = tf.constant(np.load(token_weight)["embeddings"], dtype=tf.float32, name="weight",
                                   shape=[token_size - 1, 1])
@@ -130,7 +128,7 @@ def embedding_lookup(tokens, token_size, token_dim, token2vec=None, token_weight
         token_emb = tf.nn.embedding_lookup(table, tokens)
         if project:
             new_dim = token_dim if new_dim is None else new_dim
-            token_emb = tf.layers.dense(token_emb, units=new_dim, use_bias=True, activation=None, reuse=tf.AUTO_REUSE,
+            token_emb = tf.layers.dense(token_emb, units=new_dim, use_bias=True, activation=None,
                                         name="token_project")
         return token_emb
 
@@ -153,14 +151,14 @@ def add_perturbation(emb, loss, epsilon=5.0):
     return emb + perturb
 
 
-def self_attention(inputs, return_alphas=False, project=True, reuse=tf.AUTO_REUSE, name="self_attention"):
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+def self_attention(inputs, return_alphas=False, project=True, name="self_attention"):
+    with tf.variable_scope(name, dtype=tf.float32):
         hidden_size = inputs.shape[-1].value
         if project:
             x = tf.layers.dense(inputs, units=hidden_size, use_bias=False, activation=tf.nn.tanh)
         else:
             x = inputs
-        weight = tf.get_variable(name="weight", shape=[hidden_size, 1], dtype=tf.float32,
+        weight = tf.Variable(name="weight", initial_value=tf.zeros([hidden_size, 1]), dtype=tf.float32,
                                  initializer=tf.random_normal_initializer(stddev=0.01, seed=1227))
         x = tf.tensordot(x, weight, axes=1)
         alphas = tf.nn.softmax(x, axis=-2)
@@ -203,17 +201,17 @@ def focal_loss(logits, labels, seq_len=None, weights=None, alpha=0.25, gamma=2):
     return cross_entropy
 
 
-def discriminator(features, labels, num_class, grad_rev_rate=0.7, alpha=0.25, gamma=2, mode=0, reuse=tf.AUTO_REUSE,
+def discriminator(features, labels, num_class, grad_rev_rate=0.7, alpha=0.25, gamma=2, mode=0,
                   name="discriminator"):
     if mode not in [0, 1, 2]:
         raise ValueError("Unknown mode!!!!")
-    with tf.variable_scope(name, reuse=reuse, dtype=tf.float32):
+    with tf.variable_scope(name, dtype=tf.float32):
         if mode == 0:
             return None
         else:
             feat = flip_gradient(features, lw=grad_rev_rate)
-            outputs = self_attention(feat, project=True, reuse=reuse, name="self_attention")
-            logits = tf.layers.dense(outputs, units=num_class, use_bias=True, reuse=reuse, name="discriminator_dense")
+            outputs = self_attention(feat, project=True, name="self_attention")
+            logits = tf.layers.dense(outputs, units=num_class, use_bias=True, name="discriminator_dense")
             if mode == 1:  # normal discriminator
                 loss = tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=labels)
                 loss = tf.reduce_mean(loss)

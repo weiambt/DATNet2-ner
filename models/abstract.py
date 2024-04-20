@@ -13,7 +13,8 @@ class Abstract:
     def __init__(self, config):
         self.cfg = config
         self.checkpoint_path = "ckpt/{}/".format(self.cfg.model_name)
-        tf.set_random_seed(self.cfg.random_seed)
+        tf.random.set_seed(self.cfg.random_seed)
+        np.random.seed(self.cfg.random_seed)
         # create folders and logger
         if not os.path.exists(self.checkpoint_path):
             os.makedirs(self.checkpoint_path)

@@ -1,6 +1,11 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_hub as hub
+
+from tensorflow.keras.layers import Input
+from transformers import TFAutoModel,AutoTokenizer
+
+import DEBUG
 from utils.logger import Progbar
 from models.abstract import Abstract
 from models.modules import create_optimizer, viterbi_decode
@@ -16,8 +21,14 @@ class DATNetPModel(Abstract):
             self._add_placeholders()
             # elmo_url = 'https://kaggle.com/models/google/elmo/TensorFlow1/elmo/2'
             # elmo_url = "https://tfhub.dev/google/elmo/2"
-            elmo_url = '/share/home/MP2209128/huggingface/elmo'
-            self.elmo = hub.Module(elmo_url, trainable=True) if self.cfg.elmo else None
+            # elmo_url = '/share/home/MP2209128/huggingface/elmo'
+            # self.elmo = hub.Module(elmo_url, trainable=True) if self.cfg.elmo else None
+
+            huggingface_tag = '/share/home/MP2209128/huggingface/bert/bert-base-chinese'
+            self.pretrained_model = TFAutoModel.from_pretrained(huggingface_tag)
+
+            self.tokenizer = AutoTokenizer.from_pretrained(huggingface_tag)
+
             self._build_model()
             self.logger.info("total params: {}".format(self.count_params()))
             self._initialize_session()
@@ -54,30 +65,34 @@ class DATNetPModel(Abstract):
 
     def _add_placeholders(self):
         # source placeholders
+        # pass
         if self.cfg.elmo:
-            self.src_words = tf.placeholder(tf.string, shape=[None, None], name="source_words")
+            # print(self.src_words)
+            self.src_words = Input(dtype=tf.string, shape=[None, None], name="source_words")
+
         else:
-            self.src_words = tf.placeholder(tf.int32, shape=[None, None], name="source_words")
-        self.src_seq_len = tf.placeholder(tf.int32, shape=[None], name="source_seq_len")
-        self.src_chars = tf.placeholder(tf.int32, shape=[None, None, None], name="source_chars")
-        self.src_char_seq_len = tf.placeholder(tf.int32, shape=[None, None], name="source_char_seq_len")
-        self.src_labels = tf.placeholder(tf.int32, shape=[None, None], name="source_labels")
+            self.src_words = Input(dtype=tf.int32, shape=[None, None], name="source_words")
+        self.src_seq_len = Input(dtype=tf.int32, shape=[None], name="source_seq_len")
+        self.src_chars = Input(dtype=tf.int32, shape=[None, None, None], name="source_chars")
+        self.src_char_seq_len = Input(dtype=tf.int32, shape=[None, None], name="source_char_seq_len")
+        self.src_labels = Input(dtype=tf.int32, shape=[None, None], name="source_labels")
         # target placeholders
         if self.cfg.elmo:
-            self.tgt_words = tf.placeholder(tf.string, shape=[None, None], name="target_words")
+            self.tgt_words = Input(dtype=tf.string, shape=[None, None], name="target_words")
         else:
-            self.tgt_words = tf.placeholder(tf.int32, shape=[None, None], name="target_words")
-        self.tgt_seq_len = tf.placeholder(tf.int32, shape=[None], name="target_seq_len")
-        self.tgt_chars = tf.placeholder(tf.int32, shape=[None, None, None], name="target_chars")
-        self.tgt_char_seq_len = tf.placeholder(tf.int32, shape=[None, None], name="target_char_seq_len")
-        self.tgt_labels = tf.placeholder(tf.int32, shape=[None, None], name="target_labels")
+            self.tgt_words = Input(dtype=tf.int32, shape=[None, None], name="target_words")
+        self.tgt_seq_len = Input(dtype=tf.int32, shape=[None], name="target_seq_len")
+        self.tgt_chars = Input(dtype=tf.int32, shape=[None, None, None], name="target_chars")
+        self.tgt_char_seq_len = Input(dtype=tf.int32, shape=[None, None], name="target_char_seq_len")
+        self.tgt_labels = Input(dtype=tf.int32, shape=[None, None], name="target_labels")
         # domain labels
-        self.domain_labels = tf.placeholder(tf.int32, shape=[None, 2], name="domain_labels")
+        self.domain_labels = Input(dtype=tf.int32, shape=[None, 2], name="domain_labels")
         # hyper-parameters
-        self.training = tf.placeholder(tf.bool, shape=[], name="training")
+        self.training = Input(dtype=tf.bool, shape=[], name="training")
 
     def _build_model(self):
         if self.cfg.elmo:
+
             src_word_emb = self._get_elmo_emb(self.src_words, self.src_seq_len)
             tgt_word_emb = self._get_elmo_emb(self.tgt_words, self.tgt_seq_len)
         else:
@@ -149,6 +164,8 @@ class DATNetPModel(Abstract):
 
         # train source
         self.src_logits, self.src_transition, self.src_loss = compute_src_logits(src_word_emb, src_char_emb)
+        # DEBUG.cout('self.src_logits',self.src_logits)
+        # exit()
         if self.cfg.at:  # adversarial training
             perturb_src_word_emb = add_perturbation(src_word_emb, self.src_loss, epsilon=self.cfg.epsilon)
             perturb_src_char_emb = add_perturbation(src_char_emb, self.src_loss, epsilon=self.cfg.epsilon)
@@ -185,16 +202,22 @@ class DATNetPModel(Abstract):
         best_score, no_imprv_epoch, src_lr, tgt_lr, cur_step = -np.inf, 0, self.cfg.lr, self.cfg.lr, 0
         for epoch in range(1, self.cfg.epochs + 1):
             self.logger.info("Epoch {}/{}:".format(epoch, self.cfg.epochs))
+            # 按照一定比例混合源数据集和目标数据集，并获得处理后的批次信息
             batches = self._arrange_batches(src_dataset.num_batches, tgt_dataset.num_batches, self.cfg.mix_rate)
             prog = Progbar(target=len(batches))
             prog.update(0, [("Global Step", int(cur_step)), ("Source Train Loss", 0.0), ("Target Train Loss", 0.0)])
             for i, batch_name in enumerate(batches):
                 cur_step += 1
+                # 如果当前批次是源数据集
                 if batch_name == "src":
+                    # 获取源数据集的下一个批次数据
                     data = src_dataset.next_batch()
+                    # 生成对应的域标签（源域）
                     domain_labels = [[1, 0]] * data["batch_size"]
+                    # feed_dict 的作用是将获取到的数据以及其他相关参数传递给 TensorFlow 的计算图，供模型训练时使用。
                     feed_dict = self._get_feed_dict(src_data=data, tgt_data=None, domain_labels=domain_labels,
                                                     training=True)
+                    # 运行源数据集的训练操作和损失计算，获取损失值
                     _, src_cost = self.sess.run([self.src_train_op, self.src_loss], feed_dict=feed_dict)
                     prog.update(i + 1, [("Global Step", int(cur_step)), ("Source Train Loss", src_cost)])
                 else:  # "tgt"

@@ -1,4 +1,6 @@
 import os
+
+import DEBUG
 from utils.data_fns import process_transfer
 from utils.data_utils import Dataset, boolean_string
 from models.datnetp import DATNetPModel
@@ -65,15 +67,25 @@ os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_idx
 
 print("load dataset...")
 src_datasets, tgt_datasets, vocab = process_transfer(config)
-print(src_datasets)
+
+# DEBUG.cout('src_datasets',src_datasets)
+# DEBUG.cout('tgt_datasets',tgt_datasets)
+# print('---------------------')
+# DEBUG.coutobj(vocab)
+# exit()
+
+
 train_rate = int(config.train_rate) if float(config.train_rate) > 1.0 else float(config.train_rate)
 src_dataset = Dataset(src_datasets, batch_size=config.batch_size, shuffle=True)
 tgt_dataset = Dataset(tgt_datasets, batch_size=config.batch_size, train_rate=train_rate, shuffle=True)
 
-
+DEBUG.coutobj(src_dataset)
+# exit(0)
 
 print("build model and train...")
+
 model = DATNetPModel(config, vocab)
+DEBUG.cout('vocab',vocab)
 if config.restore_model:
     model.restore_last_session()
 if config.train:

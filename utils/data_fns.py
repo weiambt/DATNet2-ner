@@ -4,6 +4,8 @@ import ujson
 import numpy as np
 from tqdm import tqdm
 from collections import Counter
+
+import DEBUG
 from utils.data_utils import Vocabulary, TransVocabulary
 
 np.random.seed(12345)
@@ -78,7 +80,7 @@ def raw_dataset_iter(filename, word_lower=True, char_lower=False):
                 yield words, chars, labels
                 words, chars, labels = [], [], []
             else:
-                word, label = line.split("\t")
+                word, label = line.split(" ") # 2024年4月19日 15:08:18 原来是\t，但是我的数据是空格分隔
                 word, char = word_convert(word, word_lower=word_lower, char_lower=char_lower)
                 words.append(word)
                 chars.append(char)
@@ -89,6 +91,9 @@ def raw_dataset_iter(filename, word_lower=True, char_lower=False):
 
 def load_dataset(filename, task, iobes, word_lower=True, char_lower=False):
     dataset = list()
+    # DEBUG.cout('filename',filename)
+    # DEBUG.cout('task',task)
+    # exit()
     if not os.path.exists(filename):
         return dataset
     for words, chars, labels in raw_dataset_iter(filename, word_lower, char_lower):
@@ -168,12 +173,15 @@ def build_dataset(data, word_dict, char_dict, label_dict):
 
 
 def read_data_and_vocab(task, config):
-    print(task)
+    # print(task)
     path = "datasets/{}/".format(task)
     train_data = load_dataset(path + "train.txt", task, config.iobes, config.word_lower, config.char_lower)
     dev_data = load_dataset(path + "valid.txt", task, config.iobes, config.word_lower, config.char_lower)
     test_data = load_dataset(path + "test.txt", task, config.iobes, config.word_lower, config.char_lower)
+    DEBUG.cout('train_data',train_data)
+    # exit()
     word_counter, char_counter, label_counter = build_token_counters([train_data, dev_data, test_data])
+    DEBUG.cout('word_counter',word_counter)
     return train_data, dev_data, test_data, word_counter, char_counter, label_counter
 
 
@@ -258,8 +266,8 @@ def process_transfer(cfg):
     t_train_data, t_dev_data, t_test_data, t_word_counter, t_char_counter, t_label_counter = read_data_and_vocab(
         cfg.tgt_task, config=cfg)
     
-    print(s_train_data)
-    print(t_train_data)
+    # print(s_train_data)
+    # print(t_train_data)
     # build word vocab
     # 如果需要共享词汇表，将源和目标任务的词汇计数合并
     if cfg.share_word:
